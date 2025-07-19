@@ -304,9 +304,11 @@ fn main() {
         let mini_dir_y = mini_py as f32 + player.angle.sin() * (mini_block as f32);
         d.draw_line(mini_px, mini_py, mini_dir_x as i32, mini_dir_y as i32, Color::WHITE);
 
-        // Mostrar FPS en la esquina superior izquierda
+        // Mostrar FPS en la esquina inferior derecha
         let fps_color = if fps > 15 { Color::GREEN } else { Color::RED };
-        d.draw_text(&format!("FPS: {}", fps), 10, 40, 20, fps_color);
+        let fps_text = format!("FPS: {}", fps);
+        let text_size = d.measure_text(&fps_text, 20);
+        d.draw_text(&fps_text, window_width - text_size - 20, window_height - 40, 20, fps_color);
 
         // Instrucciones claras en pantalla
         d.draw_text("Controles:", 10, 10, 20, Color::WHITE);
