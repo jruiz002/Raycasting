@@ -1,8 +1,6 @@
 use raylib::prelude::*;
 use std::fs::File;
 use std::io::BufReader;
-use std::thread;
-use std::time::Duration;
 use rodio::{Decoder, OutputStream, Sink, Source};
 
 const MAZE: &[&str] = &[
@@ -23,7 +21,7 @@ const MAZE: &[&str] = &[
 struct Player {
     x: f32,
     y: f32,
-    angle: f32, // en radianes
+    angle: f32,
     speed: f32,
 }
 
@@ -33,28 +31,32 @@ impl Player {
             x,
             y,
             angle: 0.0,
-            speed: 3.0, // velocidad aumentada
+            speed: 0.2,
         }
     }
 }
 
-fn is_wall(x: f32, y: f32, block_size: i32) -> bool {
+fn get_maze_cell(x: f32, y: f32, block_size: i32) -> char {
     let col = (x / block_size as f32) as usize;
     let row = (y / block_size as f32) as usize;
     if row >= MAZE.len() || col >= MAZE[0].len() {
-        return true;
+        return '#';
     }
-    MAZE[row].chars().nth(col) == Some('#')
+    MAZE[row].chars().nth(col).unwrap_or('#')
+}
+
+fn is_wall(x: f32, y: f32, block_size: i32) -> bool {
+    get_maze_cell(x, y, block_size) == '#'
 }
 
 fn wall_color(cell: char) -> Color {
     match cell {
-        '#' => Color::RED,
-        'A' => Color::GREEN,
-        'B' => Color::BLUE,
-        'C' => Color::PURPLE,
-        'E' => Color::LIME,
-        _ => Color::GRAY,
+        '#' => Color::new(180, 60, 60, 255),    // Rojo ladrillo
+        'A' => Color::new(60, 180, 60, 255),    // Verde
+        'B' => Color::new(60, 60, 180, 255),    // Azul
+        'C' => Color::new(180, 180, 60, 255),   // Amarillo
+        'E' => Color::new(180, 60, 180, 255),   // Magenta (meta)
+        _ => Color::new(120, 120, 120, 255),    // Gris
     }
 }
 
@@ -69,29 +71,112 @@ fn find_cell(cell: char) -> Option<(usize, usize)> {
     None
 }
 
+// Función de raycasting mejorada usando DDA (Digital Differential Analyzer)
+fn cast_ray(start_x: f32, start_y: f32, angle: f32, block_size: i32) -> (f32, char, bool) {
+    let dx = angle.cos();
+    let dy = angle.sin();
+    
+    // Posición actual del rayo
+    let mut map_x = (start_x / block_size as f32) as i32;
+    let mut map_y = (start_y / block_size as f32) as i32;
+    
+    // Distancia hasta el siguiente lado x o y
+    let mut side_dist_x: f32;
+    let mut side_dist_y: f32;
+    
+    // Distancia que el rayo debe viajar para ir de un lado x al siguiente, o de un lado y al siguiente
+    let delta_dist_x = if dx == 0.0 { 1e30 } else { (1.0 / dx).abs() };
+    let delta_dist_y = if dy == 0.0 { 1e30 } else { (1.0 / dy).abs() };
+    
+    let mut hit = false;
+    let mut side = false; // false si es lado NS, true si es lado EW
+    
+    // Dirección del paso y distancia inicial al lado
+    let step_x: i32;
+    let step_y: i32;
+    
+    if dx < 0.0 {
+        step_x = -1;
+        side_dist_x = (start_x / block_size as f32 - map_x as f32) * delta_dist_x;
+    } else {
+        step_x = 1;
+        side_dist_x = (map_x as f32 + 1.0 - start_x / block_size as f32) * delta_dist_x;
+    }
+    
+    if dy < 0.0 {
+        step_y = -1;
+        side_dist_y = (start_y / block_size as f32 - map_y as f32) * delta_dist_y;
+    } else {
+        step_y = 1;
+        side_dist_y = (map_y as f32 + 1.0 - start_y / block_size as f32) * delta_dist_y;
+    }
+    
+    // Realizar DDA
+    while !hit {
+        // Saltar al siguiente lado del mapa, ya sea un lado x o un lado y
+        if side_dist_x < side_dist_y {
+            side_dist_x += delta_dist_x;
+            map_x += step_x;
+            side = false;
+        } else {
+            side_dist_y += delta_dist_y;
+            map_y += step_y;
+            side = true;
+        }
+        
+        // Verificar si el rayo golpeó una pared
+        if map_x < 0 || map_y < 0 || map_x >= MAZE[0].len() as i32 || map_y >= MAZE.len() as i32 {
+            hit = true;
+        } else {
+            let cell = MAZE[map_y as usize].chars().nth(map_x as usize).unwrap_or('#');
+            if cell == '#' || cell == 'E' {
+                hit = true;
+            }
+        }
+    }
+    
+    // Calcular distancia
+    let perp_wall_dist = if !side {
+        (map_x as f32 - start_x / block_size as f32 + (1.0 - step_x as f32) / 2.0) / dx
+    } else {
+        (map_y as f32 - start_y / block_size as f32 + (1.0 - step_y as f32) / 2.0) / dy
+    };
+    
+    let distance = perp_wall_dist * block_size as f32;
+    
+    let wall_type = if map_x < 0 || map_y < 0 || map_x >= MAZE[0].len() as i32 || map_y >= MAZE.len() as i32 {
+        '#'
+    } else {
+        MAZE[map_y as usize].chars().nth(map_x as usize).unwrap_or('#')
+    };
+    
+    (distance, wall_type, side)
+}
+
 fn main() {
     let window_width = 800;
-    let window_height = 800;
-    let block_size = window_width / MAZE[0].len() as i32;
-    let fov = 1.2; // FOV más natural (~69 grados)
-    let num_rays = window_width / 2; // Usar la mitad izquierda para la vista 3D
+    let window_height = 600;
+    let block_size = 64; 
+    let fov = 1.047; // 60 grados en radianes
 
-    let mouse_sensitivity = 0.002; // Sensibilidad baja para el mouse
-    let key_rotation_speed = 0.025; // Sensibilidad baja para el teclado
-    let bump_file_path = "assets/bump.wav";
+    let mouse_sensitivity = 0.003;
+    let key_rotation_speed = 0.004;
 
     let (mut rl, thread) = raylib::init()
         .size(window_width, window_height)
-        .title("Laberinto Raycasting")
+        .title("Laberinto Raycasting 3D")
         .build();
 
     rl.set_mouse_position((window_width as f32 / 2.0, window_height as f32 / 2.0));
     rl.disable_cursor();
 
-    // Encuentra el punto inicial (primer espacio vacío) y el final ('E')
+    // Encuentra el punto inicial y final
     let (start_row, start_col) = find_cell(' ').unwrap_or((1, 1));
-    let (end_row, end_col) = find_cell('E').unwrap_or((10, 10));
-    let mut player = Player::new((start_col as f32 + 0.5) * block_size as f32, (start_row as f32 + 0.5) * block_size as f32);
+    let (_end_row, _end_col) = find_cell('E').unwrap_or((10, 10));
+    let mut player = Player::new(
+        (start_col as f32 + 0.5) * block_size as f32,
+        (start_row as f32 + 0.5) * block_size as f32
+    );
     let mut show_instructions = true;
     let mut show_success = false;
 
@@ -107,23 +192,23 @@ fn main() {
     let (_fx_stream, fx_stream_handle) = OutputStream::try_default().unwrap();
     let fx_sink = Sink::try_new(&fx_stream_handle).unwrap();
     let bump_file_path = "assets/bump.wav";
+    let mut last_bump_time = 0.0f64;
 
     while !rl.window_should_close() {
-        // Pantalla de bienvenida/instrucciones
+        // Pantalla de instrucciones
         if show_instructions {
-            // Leer entrada antes de begin_drawing
             let enter_pressed = rl.is_key_pressed(KeyboardKey::KEY_ENTER);
             let mut d = rl.begin_drawing(&thread);
             d.clear_background(Color::DARKBLUE);
-            d.draw_text("LABERINTO RAYCASTING", 120, 100, 40, Color::YELLOW);
+            d.draw_text("LABERINTO 3D RAYCASTING", 80, 100, 40, Color::YELLOW);
             d.draw_text("Controles:", 120, 180, 30, Color::WHITE);
             d.draw_text("- W/S: Avanzar / Retroceder", 140, 220, 24, Color::LIGHTGRAY);
-            d.draw_text("- A/D: Girar a la izquierda / derecha", 140, 250, 24, Color::LIGHTGRAY);
-            d.draw_text("- Mouse: Girar la cámara horizontalmente", 140, 280, 24, Color::LIGHTGRAY);
+            d.draw_text("- A/D: Girar izquierda / derecha", 140, 250, 24, Color::LIGHTGRAY);
+            d.draw_text("- Mouse: Mirar alrededor", 140, 280, 24, Color::LIGHTGRAY);
             d.draw_text("- ESC: Salir", 140, 310, 24, Color::LIGHTGRAY);
-            d.draw_text("- Mueve el mouse para mirar alrededor", 140, 340, 24, Color::LIGHTGRAY);
-            d.draw_text("Presiona ENTER para comenzar", 120, 400, 30, Color::GREEN);
-            drop(d); // Termina el scope de dibujo antes de modificar rl
+            d.draw_text("Objetivo: Encuentra la salida (E) marcada en magenta", 80, 380, 20, Color::LIME);
+            d.draw_text("Presiona ENTER para comenzar", 120, 450, 30, Color::GREEN);
+            drop(d);
             if enter_pressed {
                 show_instructions = false;
                 rl.set_mouse_position((window_width as f32 / 2.0, window_height as f32 / 2.0));
@@ -137,11 +222,10 @@ fn main() {
             let mut d = rl.begin_drawing(&thread);
             d.clear_background(Color::DARKBLUE);
             d.draw_text("¡FELICIDADES!", 200, 200, 50, Color::YELLOW);
-            d.draw_text("¡Has llegado a la meta!", 180, 270, 30, Color::LIME);
-            d.draw_text("Presiona ENTER para reiniciar", 150, 350, 30, Color::WHITE);
+            d.draw_text("¡Has completado el laberinto!", 150, 270, 30, Color::LIME);
+            d.draw_text("Presiona ENTER para reiniciar", 140, 350, 30, Color::WHITE);
             drop(d);
             if enter_pressed {
-                // Reiniciar jugador a la posición inicial
                 player.x = (start_col as f32 + 0.5) * block_size as f32;
                 player.y = (start_row as f32 + 0.5) * block_size as f32;
                 player.angle = 0.0;
@@ -152,13 +236,13 @@ fn main() {
             continue;
         }
 
-        // Obtener FPS antes de begin_drawing para evitar error de préstamos
         let fps = rl.get_fps();
 
-        // Movimiento del jugador y colisiones con sonido
+        // Movimiento del jugador
         let mut dx = 0.0;
         let mut dy = 0.0;
         let mut tried_to_move = false;
+        
         if rl.is_key_down(KeyboardKey::KEY_W) {
             dx += player.angle.cos() * player.speed;
             dy += player.angle.sin() * player.speed;
@@ -176,42 +260,41 @@ fn main() {
             player.angle += key_rotation_speed;
         }
 
-        // Guardar posición previa
-        let prev_x = player.x;
-        let prev_y = player.y;
+        // Colisiones
+        let mut collided = false;
         let next_x = player.x + dx;
         let next_y = player.y + dy;
-        let mut collided = false;
+        
         if !is_wall(next_x, player.y, block_size) {
             player.x = next_x;
-        } else if tried_to_move && (dx != 0.0) {
+        } else if tried_to_move && dx != 0.0 {
             collided = true;
         }
+        
         if !is_wall(player.x, next_y, block_size) {
             player.y = next_y;
-        } else if tried_to_move && (dy != 0.0) {
+        } else if tried_to_move && dy != 0.0 {
             collided = true;
         }
-        // Si hubo colisión, reproducir sonido
+
+        // Si hubo colisión, reproducir sonido (con cooldown)
         if collided {
-            println!("Intentando reproducir sonido de choque...");
-            match File::open(bump_file_path) {
-                Ok(file) => match Decoder::new(BufReader::new(file)) {
-                    Ok(source) => {
-                        fx_sink.append(source);
-                        println!("Sonido de choque reproducido.");
-                    }
-                    Err(e) => {
-                        println!("Error al decodificar el archivo de sonido: {}", e);
-                    }
-                },
-                Err(e) => {
-                    println!("Error al abrir el archivo de sonido: {}", e);
+            let now = rl.get_time();
+            if now - last_bump_time > 0.1 {
+                match File::open(bump_file_path) {
+                    Ok(file) => match Decoder::new(BufReader::new(file)) {
+                        Ok(source) => {
+                            fx_sink.append(source);
+                        }
+                        Err(_) => {}
+                    },
+                    Err(_) => {}
                 }
+                last_bump_time = now;
             }
         }
 
-        // Rotación con el mouse (horizontal)
+        // Rotación con mouse
         let mouse_x = rl.get_mouse_x();
         let center_x = window_width / 2;
         let delta_x = mouse_x - center_x;
@@ -219,138 +302,173 @@ fn main() {
         rl.set_mouse_position((center_x as f32, rl.get_mouse_y() as f32));
 
         // Detectar llegada a la meta
-        let player_col = (player.x / block_size as f32) as usize;
-        let player_row = (player.y / block_size as f32) as usize;
-        if MAZE[player_row].chars().nth(player_col) == Some('E') {
+        let player_cell = get_maze_cell(player.x, player.y, block_size);
+        if player_cell == 'E' {
             show_success = true;
             continue;
         }
 
         let time = rl.get_time();
         let mut d = rl.begin_drawing(&thread);
-        d.clear_background(Color::DARKBLUE);
-        // --- Renderizado 3D: cielo, piso y paredes bien diferenciadas ---
-        for y in 0..window_height {
-            for x in 0..window_width {
-                if y < window_height / 2 {
-                    d.draw_pixel(x as i32, y, Color::new(120, 180, 255, 255)); // cielo azul claro
-                } else {
-                    d.draw_pixel(x as i32, y, Color::new(60, 60, 60, 255)); // piso gris oscuro
-                }
-            }
+        d.clear_background(Color::BLACK);
+
+        // Dibujar cielo y piso mejorados (cielo 25%, piso 75%)
+        let sky_height = (window_height as f32 * 0.25) as i32;
+        let floor_start = sky_height;
+        let horizon_blend = 20; // zona de transición suave
+
+        // Cielo: azul profundo a azul claro
+        for y in 0..sky_height {
+            let t = y as f32 / sky_height as f32;
+            let sky_color = Color::new(
+                (30.0 * (1.0 - t) + 120.0 * t) as u8,
+                (60.0 * (1.0 - t) + 180.0 * t) as u8,
+                (120.0 * (1.0 - t) + 255.0 * t) as u8,
+                255
+            );
+            d.draw_line(0, y, window_width, y, sky_color);
         }
-        for col in 0..window_width {
-            let ray_angle = player.angle - fov / 2.0 + fov * (col as f32) / (window_width as f32);
-            let mut dist = 0.0;
-            let mut hit_wall = false;
-            let mut wall_type = '#';
-            let mut hit_x = 0.0;
-            let mut hit_y = 0.0;
-            while dist < 20.0 && !hit_wall {
-                let rx = player.x + ray_angle.cos() * dist;
-                let ry = player.y + ray_angle.sin() * dist;
-                let mx = (rx / block_size as f32).floor() as isize;
-                let my = (ry / block_size as f32).floor() as isize;
-                if mx < 0 || my < 0 || mx >= MAZE[0].len() as isize || my >= MAZE.len() as isize {
-                    hit_wall = true;
-                    wall_type = '#';
-                } else {
-                    let cell = MAZE[my as usize].chars().nth(mx as usize).unwrap_or('#');
-                    if cell != ' ' {
-                        hit_wall = true;
-                        wall_type = cell;
-                        hit_x = rx / block_size as f32;
-                        hit_y = ry / block_size as f32;
-                    }
-                }
-                dist += 0.04;
-            }
-            // Corrección fish-eye
-            let dist = dist * (player.angle - ray_angle).cos();
-            // Proyección vertical
-            let wall_height = (window_height as f32 * 1.2 / dist.max(0.2)).min(window_height as f32);
-            let wall_top = (window_height as f32 / 2.0) - wall_height / 2.0;
+
+        // Piso: gris oscuro a marrón claro
+        for y in floor_start..window_height {
+            let t = (y - floor_start) as f32 / (window_height - floor_start) as f32;
+            let floor_color = Color::new(
+                (80.0 * (1.0 - t) + 180.0 * t) as u8,
+                (70.0 * (1.0 - t) + 120.0 * t) as u8,
+                (60.0 * (1.0 - t) + 80.0 * t) as u8,
+                255
+            );
+            d.draw_line(0, y, window_width, y, floor_color);
+        }
+
+        // Transición suave en el horizonte
+        for y in (sky_height - horizon_blend)..(sky_height + horizon_blend).min(window_height) {
+            let t = (y - (sky_height - horizon_blend)) as f32 / (2.0 * horizon_blend as f32);
+            let sky_color = Color::new(
+                (30.0 * (1.0 - t) + 120.0 * t) as u8,
+                (60.0 * (1.0 - t) + 180.0 * t) as u8,
+                (120.0 * (1.0 - t) + 255.0 * t) as u8,
+                255
+            );
+            let floor_color = Color::new(
+                (80.0 * (1.0 - t) + 180.0 * t) as u8,
+                (70.0 * (1.0 - t) + 120.0 * t) as u8,
+                (60.0 * (1.0 - t) + 80.0 * t) as u8,
+                255
+            );
+            // Mezcla ambos colores para suavizar la transición
+            let blend_color = Color::new(
+                ((sky_color.r as u16 + floor_color.r as u16) / 2) as u8,
+                ((sky_color.g as u16 + floor_color.g as u16) / 2) as u8,
+                ((sky_color.b as u16 + floor_color.b as u16) / 2) as u8,
+                255
+            );
+            d.draw_line(0, y, window_width, y, blend_color);
+        }
+
+        // Raycasting 3D
+        for x in 0..window_width {
+            let ray_angle = player.angle - fov / 2.0 + (x as f32 / window_width as f32) * fov;
+            let (distance, wall_type, is_side) = cast_ray(player.x, player.y, ray_angle, block_size);
+            
+            // Calcular altura de la pared en pantalla
+            let wall_height = (window_height as f32 * block_size as f32 / distance.max(1.0)) as i32;
+            let wall_top = (window_height / 2) - wall_height / 2;
             let wall_bottom = wall_top + wall_height;
-            let mut color = match wall_type {
-                '#' => Color::new(255, 0, 0, 255),      // rojo puro
-                'A' => Color::new(0, 255, 0, 255),      // verde puro
-                'B' => Color::new(0, 0, 255, 255),      // azul puro
-                'C' => Color::new(255, 255, 0, 255),    // amarillo
-                'E' => Color::new(255, 0, 255, 255),    // magenta
-                _ => Color::DARKGRAY,
+            
+            // Color base de la pared
+            let mut wall_color = match wall_type {
+                '#' => Color::new(200, 80, 80, 255),    // Rojo ladrillo
+                'E' => Color::new(255, 100, 255, 255),  // Magenta brillante para la meta
+                _ => Color::new(150, 150, 150, 255),
             };
-            // Sombreado clásico: paredes verticales más oscuras
-            let is_vertical = (hit_x.fract() < 0.05) || (hit_x.fract() > 0.95);
-            if is_vertical {
-                color = Color::new(
-                    (color.r as f32 * 0.6) as u8,
-                    (color.g as f32 * 0.6) as u8,
-                    (color.b as f32 * 0.6) as u8,
+            
+            // Sombreado según el lado de la pared
+            if is_side {
+                wall_color = Color::new(
+                    (wall_color.r as f32 * 0.75) as u8,
+                    (wall_color.g as f32 * 0.75) as u8,
+                    (wall_color.b as f32 * 0.75) as u8,
                     255,
                 );
             }
-            // Degradado por distancia
-            let fade = (1.0 - (dist / 30.0)).clamp(0.4, 1.0);
-            color = Color::new(
-                (color.r as f32 * fade) as u8,
-                (color.g as f32 * fade) as u8,
-                (color.b as f32 * fade) as u8,
+            
+            // Atenuación por distancia
+            let max_distance = block_size as f32 * 15.0;
+            let fade = (1.0 - (distance / max_distance)).clamp(0.2, 1.0);
+            wall_color = Color::new(
+                (wall_color.r as f32 * fade) as u8,
+                (wall_color.g as f32 * fade) as u8,
+                (wall_color.b as f32 * fade) as u8,
                 255,
             );
-            d.draw_line_ex(
-                Vector2 { x: col as f32, y: wall_top },
-                Vector2 { x: col as f32, y: wall_bottom },
-                2.0,
-                color,
+            
+            // Dibujar la columna de pared
+            d.draw_line(
+                x, 
+                wall_top.max(0), 
+                x, 
+                wall_bottom.min(window_height), 
+                wall_color
             );
         }
-        // --- Minimapa 2D (esquina superior derecha) ---
-        let minimap_scale = 0.25;
-        let minimap_size = (window_width as f32 * minimap_scale) as i32;
+
+        // Minimapa mejorado
+        let minimap_size = 150;
         let minimap_x = window_width - minimap_size - 10;
         let minimap_y = 10;
         let mini_block = minimap_size / MAZE[0].len() as i32;
+        
+        // Fondo del minimapa
+        d.draw_rectangle(minimap_x - 2, minimap_y - 2, minimap_size + 4, minimap_size + 4, Color::BLACK);
+        
+        // Dibujar celdas del laberinto
         for (row, line) in MAZE.iter().enumerate() {
             for (col, cell) in line.chars().enumerate() {
+                let x = minimap_x + (col as i32) * mini_block;
+                let y = minimap_y + (row as i32) * mini_block;
+                
+                let color = match cell {
+                    '#' => Color::RED,
+                    'E' => Color::MAGENTA,
+                    _ => Color::WHITE,
+                };
+                
                 if cell != ' ' {
-                    let x = minimap_x + (col as i32) * mini_block;
-                    let y = minimap_y + (row as i32) * mini_block;
-                    d.draw_rectangle(x, y, mini_block, mini_block, wall_color(cell));
+                    d.draw_rectangle(x, y, mini_block, mini_block, color);
                 }
             }
         }
-        // Punto inicial en azul
-        let mini_start_x = minimap_x + (start_col as i32 * mini_block) + mini_block / 2;
-        let mini_start_y = minimap_y + (start_row as i32 * mini_block) + mini_block / 2;
-        d.draw_circle(mini_start_x, mini_start_y, (mini_block / 3) as f32, Color::BLUE);
-        // Punto final en verde
-        let mini_end_x = minimap_x + (end_col as i32 * mini_block) + mini_block / 2;
-        let mini_end_y = minimap_y + (end_row as i32 * mini_block) + mini_block / 2;
-        d.draw_circle(mini_end_x, mini_end_y, (mini_block / 3) as f32, Color::LIME);
+        
         // Jugador en el minimapa
         let mini_px = minimap_x + (player.x / block_size as f32 * mini_block as f32) as i32;
         let mini_py = minimap_y + (player.y / block_size as f32 * mini_block as f32) as i32;
-        // Animación de sprite: círculo del jugador palpita
-        let pulse = (((time * 3.0).sin() * 0.5 + 1.0) * 0.5) as f32; // valor entre 0.0 y 1.0
-        let animated_radius = (mini_block as f32 / 4.0) + pulse * (mini_block as f32 / 8.0);
-        d.draw_circle(mini_px, mini_py, animated_radius, Color::YELLOW);
-        let mini_dir_x = mini_px as f32 + player.angle.cos() * (mini_block as f32);
-        let mini_dir_y = mini_py as f32 + player.angle.sin() * (mini_block as f32);
-        d.draw_line(mini_px, mini_py, mini_dir_x as i32, mini_dir_y as i32, Color::WHITE);
+        
+        // Animación pulsante
+        let pulse = (time * 4.0).sin() * 0.3 + 1.0;
+        let radius = mini_block as f32 / 6.0 * pulse as f32;
+        d.draw_circle(mini_px, mini_py, radius, Color::YELLOW);
+        
+        // Dirección del jugador
+        let dir_length = mini_block as f32 * 0.7;
+        let dir_x = mini_px as f32 + player.angle.cos() * dir_length;
+        let dir_y = mini_py as f32 + player.angle.sin() * dir_length;
+        d.draw_line_ex(
+            Vector2 { x: mini_px as f32, y: mini_py as f32 },
+            Vector2 { x: dir_x, y: dir_y },
+            2.0,
+            Color::WHITE
+        );
 
-        // Mostrar FPS en la esquina inferior derecha
-        let fps_color = if fps > 15 { Color::GREEN } else { Color::RED };
-        let fps_text = format!("FPS: {}", fps);
-        let text_size = d.measure_text(&fps_text, 20);
-        d.draw_text(&fps_text, window_width - text_size - 20, window_height - 40, 20, fps_color);
-
-        // Instrucciones claras en pantalla
-        d.draw_text("Controles:", 10, 10, 20, Color::WHITE);
-        d.draw_text("W/S: Avanzar / Retroceder", 10, 30, 18, Color::LIGHTGRAY);
-        d.draw_text("A/D: Girar a la izquierda / derecha", 10, 50, 18, Color::LIGHTGRAY);
-        d.draw_text("Mouse: Girar la cámara horizontalmente", 10, 70, 18, Color::LIGHTGRAY);
-        d.draw_text("ESC: Salir", 10, 90, 18, Color::LIGHTGRAY);
+        // UI
+        d.draw_rectangle(5, 5, 300, 80, Color::new(0, 0, 0, 150));
+        d.draw_text("WASD: Mover | Mouse: Mirar", 10, 10, 16, Color::WHITE);
+        d.draw_text("Objetivo: Llegar a la casilla magenta (E)", 10, 30, 14, Color::LIGHTGRAY);
+        
+        let fps_color = if fps > 30 { Color::GREEN } else if fps > 15 { Color::YELLOW } else { Color::RED };
+        d.draw_text(&format!("FPS: {}", fps), 10, 50, 16, fps_color);
     }
+    
     // Detener música al salir
     sink.stop();
 }
