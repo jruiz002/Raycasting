@@ -113,7 +113,6 @@ fn cast_ray(start_x: f32, start_y: f32, angle: f32, block_size: i32) -> (f32, ch
     
     // Realizar DDA
     while !hit {
-        // Saltar al siguiente lado del mapa, ya sea un lado x o un lado y
         if side_dist_x < side_dist_y {
             side_dist_x += delta_dist_x;
             map_x += step_x;
@@ -157,7 +156,7 @@ fn main() {
     let window_width = 800;
     let window_height = 600;
     let block_size = 64; 
-    let fov = 1.047; // 60 grados en radianes
+    let fov = 1.047; 
 
     let mouse_sensitivity = 0.003;
     let key_rotation_speed = 0.004;
@@ -312,98 +311,64 @@ fn main() {
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::BLACK);
 
-        // Dibujar cielo y piso mejorados (cielo 25%, piso 75%)
+        // Cielo y piso sólidos con colores solicitados
+        let sky_color = Color::new(66, 135, 245, 255); 
+        let floor_color = Color::new(180, 180, 180, 255); 
         let sky_height = (window_height as f32 * 0.25) as i32;
-        let floor_start = sky_height;
-        let horizon_blend = 20; // zona de transición suave
-
-        // Cielo: azul profundo a azul claro
         for y in 0..sky_height {
-            let t = y as f32 / sky_height as f32;
-            let sky_color = Color::new(
-                (30.0 * (1.0 - t) + 120.0 * t) as u8,
-                (60.0 * (1.0 - t) + 180.0 * t) as u8,
-                (120.0 * (1.0 - t) + 255.0 * t) as u8,
-                255
-            );
             d.draw_line(0, y, window_width, y, sky_color);
         }
-
-        // Piso: gris oscuro a marrón claro
-        for y in floor_start..window_height {
-            let t = (y - floor_start) as f32 / (window_height - floor_start) as f32;
-            let floor_color = Color::new(
-                (80.0 * (1.0 - t) + 180.0 * t) as u8,
-                (70.0 * (1.0 - t) + 120.0 * t) as u8,
-                (60.0 * (1.0 - t) + 80.0 * t) as u8,
-                255
-            );
+        for y in sky_height..window_height {
             d.draw_line(0, y, window_width, y, floor_color);
         }
 
-        // Transición suave en el horizonte
-        for y in (sky_height - horizon_blend)..(sky_height + horizon_blend).min(window_height) {
-            let t = (y - (sky_height - horizon_blend)) as f32 / (2.0 * horizon_blend as f32);
-            let sky_color = Color::new(
-                (30.0 * (1.0 - t) + 120.0 * t) as u8,
-                (60.0 * (1.0 - t) + 180.0 * t) as u8,
-                (120.0 * (1.0 - t) + 255.0 * t) as u8,
-                255
-            );
-            let floor_color = Color::new(
-                (80.0 * (1.0 - t) + 180.0 * t) as u8,
-                (70.0 * (1.0 - t) + 120.0 * t) as u8,
-                (60.0 * (1.0 - t) + 80.0 * t) as u8,
-                255
-            );
-            // Mezcla ambos colores para suavizar la transición
-            let blend_color = Color::new(
-                ((sky_color.r as u16 + floor_color.r as u16) / 2) as u8,
-                ((sky_color.g as u16 + floor_color.g as u16) / 2) as u8,
-                ((sky_color.b as u16 + floor_color.b as u16) / 2) as u8,
-                255
-            );
-            d.draw_line(0, y, window_width, y, blend_color);
+        // --- EFECTO DE LINTERNA ---
+        let light_radius = (window_height as f32 * 0.45) as i32;
+        let center_x = (window_width / 2) as i32;
+        let center_y = (window_height / 2) as i32;
+        for r in (light_radius..(window_width.max(window_height) as i32)).step_by(8) {
+            let alpha = ((r - light_radius) as f32 / (window_height as f32 * 0.55)).clamp(0.0, 1.0);
+            let darkness = (180.0 * alpha) as u8;
+            d.draw_circle(center_x, center_y, r as f32, Color::new(0, 0, 0, darkness));
         }
 
-        // Raycasting 3D
+        // --- RAYCASTING 3D CON META ANIMADA ---
         for x in 0..window_width {
             let ray_angle = player.angle - fov / 2.0 + (x as f32 / window_width as f32) * fov;
             let (distance, wall_type, is_side) = cast_ray(player.x, player.y, ray_angle, block_size);
-            
-            // Calcular altura de la pared en pantalla
             let wall_height = (window_height as f32 * block_size as f32 / distance.max(1.0)) as i32;
             let wall_top = (window_height / 2) - wall_height / 2;
             let wall_bottom = wall_top + wall_height;
-            
-            // Color base de la pared
             let mut wall_color = match wall_type {
-                '#' => Color::new(200, 80, 80, 255),    // Rojo ladrillo
-                'E' => Color::new(255, 100, 255, 255),  // Magenta brillante para la meta
-                _ => Color::new(150, 150, 150, 255),
+                '#' => Color::new(120, 255, 120, 255),    // Verde claro
+                'E' => {
+                    // ANIMACIÓN: parpadeo entre rosa y blanco
+                    let t = ((time * 2.0).sin() * 0.5 + 0.5) as f32;
+                    Color::new(
+                        (255.0 * (1.0 - t) + 255.0 * t) as u8,
+                        (99.0 * (1.0 - t) + 255.0 * t) as u8,
+                        (130.0 * (1.0 - t) + 255.0 * t) as u8,
+                        255
+                    )
+                },
+                _ => Color::WHITE,                         
             };
-            
-            // Sombreado según el lado de la pared
             if is_side {
                 wall_color = Color::new(
-                    (wall_color.r as f32 * 0.75) as u8,
-                    (wall_color.g as f32 * 0.75) as u8,
-                    (wall_color.b as f32 * 0.75) as u8,
+                    (wall_color.r as f32 * 0.7) as u8,
+                    (wall_color.g as f32 * 0.7) as u8,
+                    (wall_color.b as f32 * 0.7) as u8,
                     255,
                 );
             }
-            
-            // Atenuación por distancia
             let max_distance = block_size as f32 * 15.0;
-            let fade = (1.0 - (distance / max_distance)).clamp(0.2, 1.0);
+            let fade = (1.0 - (distance / max_distance)).clamp(0.3, 1.0);
             wall_color = Color::new(
                 (wall_color.r as f32 * fade) as u8,
                 (wall_color.g as f32 * fade) as u8,
                 (wall_color.b as f32 * fade) as u8,
                 255,
             );
-            
-            // Dibujar la columna de pared
             d.draw_line(
                 x, 
                 wall_top.max(0), 
@@ -419,8 +384,7 @@ fn main() {
         let minimap_y = 10;
         let mini_block = minimap_size / MAZE[0].len() as i32;
         
-        // Fondo del minimapa
-        d.draw_rectangle(minimap_x - 2, minimap_y - 2, minimap_size + 4, minimap_size + 4, Color::BLACK);
+        d.draw_rectangle(minimap_x - 2, minimap_y - 2, minimap_size + 4, minimap_size + 4, Color::new(66, 135, 245, 200)); // Fondo azul translúcido
         
         // Dibujar celdas del laberinto
         for (row, line) in MAZE.iter().enumerate() {
@@ -429,9 +393,9 @@ fn main() {
                 let y = minimap_y + (row as i32) * mini_block;
                 
                 let color = match cell {
-                    '#' => Color::RED,
-                    'E' => Color::MAGENTA,
-                    _ => Color::WHITE,
+                    '#' => Color::new(120, 255, 120, 255), 
+                    'E' => Color::new(255, 99, 130, 255),   
+                    _ => Color::WHITE,                     
                 };
                 
                 if cell != ' ' {
@@ -469,6 +433,5 @@ fn main() {
         d.draw_text(&format!("FPS: {}", fps), 10, 50, 16, fps_color);
     }
     
-    // Detener música al salir
     sink.stop();
 }
