@@ -33,7 +33,7 @@ impl Player {
             x,
             y,
             angle: 0.0,
-            speed: 1.0, // velocidad reducida
+            speed: 3.0, // velocidad aumentada
         }
     }
 }
@@ -73,7 +73,7 @@ fn main() {
     let window_width = 800;
     let window_height = 800;
     let block_size = window_width / MAZE[0].len() as i32;
-    let fov = std::f32::consts::FRAC_PI_2; // 90 grados
+    let fov = 1.2; // FOV más natural (~69 grados)
     let num_rays = window_width / 2; // Usar la mitad izquierda para la vista 3D
 
     let mouse_sensitivity = 0.002; // Sensibilidad baja para el mouse
@@ -229,43 +229,77 @@ fn main() {
         let time = rl.get_time();
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::DARKBLUE);
-        // --- Raycasting y renderizado 3D ---
-        for ray in 0..num_rays {
-            let ray_screen_x = ray as f32 / num_rays as f32;
-            let ray_angle = player.angle - fov / 2.0 + ray_screen_x * fov;
-            let ray_dir_x = ray_angle.cos();
-            let ray_dir_y = ray_angle.sin();
-            let mut distance = 0.0;
-            let max_distance = 1000.0;
-            let mut hit = false;
-            let mut hit_cell = '#';
-            let mut test_x;
-            let mut test_y;
-            while !hit && distance < max_distance {
-                distance += 1.0;
-                test_x = player.x + ray_dir_x * distance;
-                test_y = player.y + ray_dir_y * distance;
-                let col = (test_x / block_size as f32) as usize;
-                let row = (test_y / block_size as f32) as usize;
-                if row >= MAZE.len() || col >= MAZE[0].len() {
-                    hit = true;
+        // --- Renderizado 3D: cielo, piso y paredes bien diferenciadas ---
+        for y in 0..window_height {
+            for x in 0..window_width {
+                if y < window_height / 2 {
+                    d.draw_pixel(x as i32, y, Color::new(120, 180, 255, 255)); // cielo azul claro
                 } else {
-                    let cell = MAZE[row].chars().nth(col).unwrap_or('#');
-                    if cell != ' ' {
-                        hit = true;
-                        hit_cell = cell;
-                    }
+                    d.draw_pixel(x as i32, y, Color::new(60, 60, 60, 255)); // piso gris oscuro
                 }
             }
-            let corrected_dist = distance * (player.angle - ray_angle).cos();
-            let wall_height = ((block_size as f32 * 8.0) / corrected_dist).min(window_height as f32);
+        }
+        for col in 0..window_width {
+            let ray_angle = player.angle - fov / 2.0 + fov * (col as f32) / (window_width as f32);
+            let mut dist = 0.0;
+            let mut hit_wall = false;
+            let mut wall_type = '#';
+            let mut hit_x = 0.0;
+            let mut hit_y = 0.0;
+            while dist < 20.0 && !hit_wall {
+                let rx = player.x + ray_angle.cos() * dist;
+                let ry = player.y + ray_angle.sin() * dist;
+                let mx = (rx / block_size as f32).floor() as isize;
+                let my = (ry / block_size as f32).floor() as isize;
+                if mx < 0 || my < 0 || mx >= MAZE[0].len() as isize || my >= MAZE.len() as isize {
+                    hit_wall = true;
+                    wall_type = '#';
+                } else {
+                    let cell = MAZE[my as usize].chars().nth(mx as usize).unwrap_or('#');
+                    if cell != ' ' {
+                        hit_wall = true;
+                        wall_type = cell;
+                        hit_x = rx / block_size as f32;
+                        hit_y = ry / block_size as f32;
+                    }
+                }
+                dist += 0.04;
+            }
+            // Corrección fish-eye
+            let dist = dist * (player.angle - ray_angle).cos();
+            // Proyección vertical
+            let wall_height = (window_height as f32 * 1.2 / dist.max(0.2)).min(window_height as f32);
             let wall_top = (window_height as f32 / 2.0) - wall_height / 2.0;
             let wall_bottom = wall_top + wall_height;
-            let color = wall_color(hit_cell);
-            let x = ray as i32;
+            let mut color = match wall_type {
+                '#' => Color::new(255, 0, 0, 255),      // rojo puro
+                'A' => Color::new(0, 255, 0, 255),      // verde puro
+                'B' => Color::new(0, 0, 255, 255),      // azul puro
+                'C' => Color::new(255, 255, 0, 255),    // amarillo
+                'E' => Color::new(255, 0, 255, 255),    // magenta
+                _ => Color::DARKGRAY,
+            };
+            // Sombreado clásico: paredes verticales más oscuras
+            let is_vertical = (hit_x.fract() < 0.05) || (hit_x.fract() > 0.95);
+            if is_vertical {
+                color = Color::new(
+                    (color.r as f32 * 0.6) as u8,
+                    (color.g as f32 * 0.6) as u8,
+                    (color.b as f32 * 0.6) as u8,
+                    255,
+                );
+            }
+            // Degradado por distancia
+            let fade = (1.0 - (dist / 30.0)).clamp(0.4, 1.0);
+            color = Color::new(
+                (color.r as f32 * fade) as u8,
+                (color.g as f32 * fade) as u8,
+                (color.b as f32 * fade) as u8,
+                255,
+            );
             d.draw_line_ex(
-                Vector2 { x: x as f32, y: wall_top },
-                Vector2 { x: x as f32, y: wall_bottom },
+                Vector2 { x: col as f32, y: wall_top },
+                Vector2 { x: col as f32, y: wall_bottom },
                 2.0,
                 color,
             );
