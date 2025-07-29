@@ -23,6 +23,8 @@ struct Player {
     y: f32,
     angle: f32,
     speed: f32,
+    lives: i32,
+    max_lives: i32,
 }
 
 impl Player {
@@ -32,7 +34,29 @@ impl Player {
             y,
             angle: 0.0,
             speed: 0.2,
+            lives: 3,
+            max_lives: 3,
         }
+    }
+
+    fn reset_position(&mut self, start_col: usize, start_row: usize, block_size: i32) {
+        self.x = (start_col as f32 + 0.5) * block_size as f32;
+        self.y = (start_row as f32 + 0.5) * block_size as f32;
+        self.angle = 0.0;
+    }
+
+    fn lose_life(&mut self) {
+        if self.lives > 0 {
+            self.lives -= 1;
+        }
+    }
+
+    fn is_alive(&self) -> bool {
+        self.lives > 0
+    }
+
+    fn reset_lives(&mut self) {
+        self.lives = self.max_lives;
     }
 }
 
@@ -71,7 +95,7 @@ fn find_cell(cell: char) -> Option<(usize, usize)> {
     None
 }
 
-// Función de raycasting mejorada usando DDA (Digital Differential Analyzer)
+// Función de raycasting
 fn cast_ray(start_x: f32, start_y: f32, angle: f32, block_size: i32) -> (f32, char, bool) {
     let dx = angle.cos();
     let dy = angle.sin();
@@ -152,6 +176,11 @@ fn cast_ray(start_x: f32, start_y: f32, angle: f32, block_size: i32) -> (f32, ch
     (distance, wall_type, side)
 }
 
+fn draw_heart(d: &mut RaylibDrawHandle, x: i32, y: i32, size: i32, color: Color) {
+    let radius = size as f32 / 2.0;
+    d.draw_circle(x, y, radius, color);
+}
+
 fn main() {
     let window_width = 800;
     let window_height = 600;
@@ -163,7 +192,7 @@ fn main() {
 
     let (mut rl, thread) = raylib::init()
         .size(window_width, window_height)
-        .title("Laberinto Raycasting 3D")
+        .title("Laberinto Raycasting 3D - Sistema de Vidas")
         .build();
 
     rl.set_mouse_position((window_width as f32 / 2.0, window_height as f32 / 2.0));
@@ -178,6 +207,9 @@ fn main() {
     );
     let mut show_instructions = true;
     let mut show_success = false;
+    let mut show_game_over = false;
+    let mut damage_effect_time = 0.0f64;
+    let mut invulnerability_time = 0.0f64;
 
     // Música de fondo
     let (_stream, stream_handle) = OutputStream::try_default().unwrap();
@@ -194,22 +226,52 @@ fn main() {
     let mut last_bump_time = 0.0f64;
 
     while !rl.window_should_close() {
+        let current_time = rl.get_time();
+
         // Pantalla de instrucciones
         if show_instructions {
             let enter_pressed = rl.is_key_pressed(KeyboardKey::KEY_ENTER);
             let mut d = rl.begin_drawing(&thread);
             d.clear_background(Color::DARKBLUE);
-            d.draw_text("LABERINTO 3D RAYCASTING", 80, 100, 40, Color::YELLOW);
-            d.draw_text("Controles:", 120, 180, 30, Color::WHITE);
-            d.draw_text("- W/S: Avanzar / Retroceder", 140, 220, 24, Color::LIGHTGRAY);
-            d.draw_text("- A/D: Girar izquierda / derecha", 140, 250, 24, Color::LIGHTGRAY);
-            d.draw_text("- Mouse: Mirar alrededor", 140, 280, 24, Color::LIGHTGRAY);
-            d.draw_text("- ESC: Salir", 140, 310, 24, Color::LIGHTGRAY);
-            d.draw_text("Objetivo: Encuentra la salida (E) marcada en magenta", 80, 380, 20, Color::LIME);
-            d.draw_text("Presiona ENTER para comenzar", 120, 450, 30, Color::GREEN);
+            d.draw_text("LABERINTO 3D RAYCASTING", 80, 80, 40, Color::YELLOW);
+            d.draw_text("Controles:", 120, 160, 30, Color::WHITE);
+            d.draw_text("- W/S: Avanzar / Retroceder", 140, 200, 24, Color::LIGHTGRAY);
+            d.draw_text("- A/D: Girar izquierda / derecha", 140, 230, 24, Color::LIGHTGRAY);
+            d.draw_text("- Mouse: Mirar alrededor", 140, 260, 24, Color::LIGHTGRAY);
+            d.draw_text("- ESC: Salir", 140, 290, 24, Color::LIGHTGRAY);
+            d.draw_text("Sistema de Vidas", 120, 340, 28, Color::RED);
+            d.draw_text("- Tienes 3 vidas", 140, 370, 20, Color::LIGHTGRAY);
+            d.draw_text("- Pierdes 1 vida al chocar con paredes", 140, 390, 20, Color::LIGHTGRAY);
+            d.draw_text("- Sin vidas = Game Over", 140, 410, 20, Color::LIGHTGRAY);
+            d.draw_text("Objetivo: Encuentra la salida marcada", 80, 450, 18, Color::LIME);
+            d.draw_text("Presiona ENTER para comenzar", 120, 500, 30, Color::GREEN);
             drop(d);
             if enter_pressed {
                 show_instructions = false;
+                player.reset_lives();
+                player.reset_position(start_col, start_row, block_size);
+                rl.set_mouse_position((window_width as f32 / 2.0, window_height as f32 / 2.0));
+            }
+            continue;
+        }
+
+        // Pantalla de Game Over
+        if show_game_over {
+            let enter_pressed = rl.is_key_pressed(KeyboardKey::KEY_ENTER);
+            let mut d = rl.begin_drawing(&thread);
+            d.clear_background(Color::MAROON);
+            d.draw_text("GAME OVER", 200, 180, 60, Color::RED);
+            d.draw_text("¡Te quedaste sin vidas!", 180, 260, 30, Color::WHITE);
+            d.draw_text("¡Fuiste demasiado descuidado!", 150, 300, 24, Color::LIGHTGRAY);
+            d.draw_text("Presiona ENTER para reiniciar", 140, 380, 30, Color::YELLOW);
+            drop(d);
+            if enter_pressed {
+                player.reset_lives();
+                player.reset_position(start_col, start_row, block_size);
+                show_game_over = false;
+                show_instructions = true;
+                damage_effect_time = 0.0;
+                invulnerability_time = 0.0;
                 rl.set_mouse_position((window_width as f32 / 2.0, window_height as f32 / 2.0));
             }
             continue;
@@ -220,22 +282,34 @@ fn main() {
             let enter_pressed = rl.is_key_pressed(KeyboardKey::KEY_ENTER);
             let mut d = rl.begin_drawing(&thread);
             d.clear_background(Color::DARKBLUE);
-            d.draw_text("¡FELICIDADES!", 200, 200, 50, Color::YELLOW);
-            d.draw_text("¡Has completado el laberinto!", 150, 270, 30, Color::LIME);
-            d.draw_text("Presiona ENTER para reiniciar", 140, 350, 30, Color::WHITE);
+            d.draw_text("¡FELICIDADES!", 200, 180, 50, Color::YELLOW);
+            d.draw_text("¡Has completado el laberinto!", 150, 250, 30, Color::LIME);
+            d.draw_text(&format!("Vidas restantes: {}", player.lives), 200, 300, 24, Color::WHITE);
+            let score_bonus = player.lives * 100;
+            d.draw_text(&format!("Bonus por vidas: {} puntos", score_bonus), 170, 330, 20, Color::GOLD);
+            d.draw_text("Presiona ENTER para reiniciar", 140, 400, 30, Color::WHITE);
             drop(d);
             if enter_pressed {
-                player.x = (start_col as f32 + 0.5) * block_size as f32;
-                player.y = (start_row as f32 + 0.5) * block_size as f32;
-                player.angle = 0.0;
+                player.reset_lives();
+                player.reset_position(start_col, start_row, block_size);
                 show_success = false;
                 show_instructions = true;
+                damage_effect_time = 0.0;
+                invulnerability_time = 0.0;
                 rl.set_mouse_position((window_width as f32 / 2.0, window_height as f32 / 2.0));
             }
             continue;
         }
 
         let fps = rl.get_fps();
+
+        // Actualizar efectos temporales
+        if damage_effect_time > 0.0 {
+            damage_effect_time -= rl.get_frame_time() as f64;
+        }
+        if invulnerability_time > 0.0 {
+            invulnerability_time -= rl.get_frame_time() as f64;
+        }
 
         // Movimiento del jugador
         let mut dx = 0.0;
@@ -259,7 +333,7 @@ fn main() {
             player.angle += key_rotation_speed;
         }
 
-        // Colisiones
+        // Colisiones y sistema de vidas
         let mut collided = false;
         let next_x = player.x + dx;
         let next_y = player.y + dy;
@@ -276,10 +350,11 @@ fn main() {
             collided = true;
         }
 
-        // Si hubo colisión, reproducir sonido (con cooldown)
-        if collided {
+        // Si hubo colisión y no está en período de invulnerabilidad
+        if collided && invulnerability_time <= 0.0 {
             let now = rl.get_time();
             if now - last_bump_time > 0.1 {
+                // Reproducir sonido
                 match File::open(bump_file_path) {
                     Ok(file) => match Decoder::new(BufReader::new(file)) {
                         Ok(source) => {
@@ -290,6 +365,17 @@ fn main() {
                     Err(_) => {}
                 }
                 last_bump_time = now;
+                
+                // Perder vida y activar efectos
+                player.lose_life();
+                damage_effect_time = 0.5; // Efecto de daño por 0.5 segundos
+                invulnerability_time = 1.0; // Invulnerabilidad por 1 segundo
+                
+                // Verificar si se acabaron las vidas
+                if !player.is_alive() {
+                    show_game_over = true;
+                    continue;
+                }
             }
         }
 
@@ -309,7 +395,14 @@ fn main() {
 
         let time = rl.get_time();
         let mut d = rl.begin_drawing(&thread);
-        d.clear_background(Color::BLACK);
+        
+        // Efecto de daño - pantalla roja
+        if damage_effect_time > 0.0 {
+            let intensity = (damage_effect_time / 0.5 * 100.0) as u8;
+            d.clear_background(Color::new(255, intensity, intensity, 255));
+        } else {
+            d.clear_background(Color::BLACK);
+        }
 
         // Cielo y piso sólidos con colores solicitados
         let sky_color = Color::new(66, 135, 245, 255); 
@@ -369,6 +462,17 @@ fn main() {
                 (wall_color.b as f32 * fade) as u8,
                 255,
             );
+            
+            // Efecto de parpadeo durante invulnerabilidad
+            if invulnerability_time > 0.0 && ((current_time * 10.0) as i32 % 2 == 0) {
+                wall_color = Color::new(
+                    (wall_color.r as f32 * 0.5) as u8,
+                    (wall_color.g as f32 * 0.5) as u8,
+                    (wall_color.b as f32 * 0.5) as u8,
+                    255,
+                );
+            }
+            
             d.draw_line(
                 x, 
                 wall_top.max(0), 
@@ -408,10 +512,15 @@ fn main() {
         let mini_px = minimap_x + (player.x / block_size as f32 * mini_block as f32) as i32;
         let mini_py = minimap_y + (player.y / block_size as f32 * mini_block as f32) as i32;
         
-        // Animación pulsante
+        // Animación pulsante y efecto de invulnerabilidad
         let pulse = (time * 4.0).sin() * 0.3 + 1.0;
         let radius = mini_block as f32 / 6.0 * pulse as f32;
-        d.draw_circle(mini_px, mini_py, radius, Color::YELLOW);
+        let player_color = if invulnerability_time > 0.0 && ((current_time * 8.0) as i32 % 2 == 0) {
+            Color::RED
+        } else {
+            Color::YELLOW
+        };
+        d.draw_circle(mini_px, mini_py, radius, player_color);
         
         // Dirección del jugador
         let dir_length = mini_block as f32 * 0.7;
@@ -424,13 +533,57 @@ fn main() {
             Color::WHITE
         );
 
-        // UI
-        d.draw_rectangle(5, 5, 300, 80, Color::new(0, 0, 0, 150));
-        d.draw_text("WASD: Mover | Mouse: Mirar", 10, 10, 16, Color::WHITE);
-        d.draw_text("Objetivo: Llegar a la casilla magenta (E)", 10, 30, 14, Color::LIGHTGRAY);
+        // Fondo para las vidas
+        d.draw_rectangle(5, 5, 350, 120, Color::new(0, 0, 0, 150));
+        
+        // Título de vidas
+        d.draw_text("VIDAS:", 15, 15, 20, Color::WHITE);
+        
+        // Dibujar corazones
+        for i in 0..player.max_lives {
+            let heart_x = 90 + i * 35;
+            let heart_y = 25;
+            let heart_size = 20;
+            
+            if i < player.lives {
+                // Corazón lleno
+                draw_heart(&mut d, heart_x, heart_y, heart_size, Color::RED);
+            } else {
+                // Corazón vacío
+                draw_heart(&mut d, heart_x, heart_y, heart_size, Color::new(80, 80, 80, 255));
+            }
+        }
+        
+        // Texto de vidas numerico
+        let lives_color = match player.lives {
+            3 => Color::GREEN,
+            2 => Color::YELLOW,
+            1 => Color::RED,
+            _ => Color::GRAY,
+        };
+        d.draw_text(&format!("{}/{}", player.lives, player.max_lives), 200, 15, 20, lives_color);
+        
+        // Estado de invulnerabilidad
+        if invulnerability_time > 0.0 {
+            let blink = ((current_time * 6.0) as i32 % 2 == 0);
+            if blink {
+                d.draw_text("INVULNERABLE", 15, 45, 16, Color::GOLD);
+            }
+        }
+        
+        // Controles y objetivo
+        d.draw_text("WASD: Mover | Mouse: Mirar", 15, 70, 14, Color::WHITE);
+        d.draw_text("¡CUIDADO! Pierdes vida al chocar", 15, 90, 12, Color::ORANGE);
         
         let fps_color = if fps > 30 { Color::GREEN } else if fps > 15 { Color::YELLOW } else { Color::RED };
-        d.draw_text(&format!("FPS: {}", fps), 10, 50, 16, fps_color);
+        d.draw_text(&format!("FPS: {}", fps), 15, 105, 14, fps_color);
+        
+        // Advertencia de pocas vidas
+        if player.lives == 1 {
+            let warning_alpha = ((time * 8.0).sin() * 0.5 + 0.5) as f32;
+            let alpha = (255.0 * warning_alpha) as u8;
+            d.draw_text("¡ÚLTIMA VIDA!", window_width / 2 - 100, 50, 30, Color::new(255, 0, 0, alpha));
+        }
     }
     
     sink.stop();
