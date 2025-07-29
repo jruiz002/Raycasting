@@ -4,18 +4,18 @@ use std::io::BufReader;
 use rodio::{Decoder, OutputStream, Sink, Source};
 
 const MAZE: &[&str] = &[
-    "############",
-    "#     #    #",
-    "# ### # ## #",
-    "# #   # #  #",
-    "# # ### ####",
-    "#   #      #",
-    "### # #### #",
-    "#   #    # #",
-    "# ##### ## #",
-    "#       #  #",
-    "##########E#",
-    "############",
+    "AAAAAAAAAAAA",
+    "A     A    A",
+    "A BBB A CC A",
+    "A B   A C  A",
+    "A B BBB CCCC",
+    "A   A      A",
+    "BBB A DDDD A",
+    "A   A    A A",
+    "A DDDDD CC A",
+    "A       A  A",
+    "AAAAAAAAAAEA",
+    "AAAAAAAAAAAA",
 ];
 
 struct Player {
@@ -70,7 +70,8 @@ fn get_maze_cell(x: f32, y: f32, block_size: i32) -> char {
 }
 
 fn is_wall(x: f32, y: f32, block_size: i32) -> bool {
-    get_maze_cell(x, y, block_size) == '#'
+    let cell = get_maze_cell(x, y, block_size);
+    cell == '#' || cell == 'A' || cell == 'B' || cell == 'C' || cell == 'D'
 }
 
 fn wall_color(cell: char) -> Color {
@@ -79,7 +80,8 @@ fn wall_color(cell: char) -> Color {
         'A' => Color::new(60, 180, 60, 255),    // Verde
         'B' => Color::new(60, 60, 180, 255),    // Azul
         'C' => Color::new(180, 180, 60, 255),   // Amarillo
-        'E' => Color::new(180, 60, 180, 255),   // Magenta (meta)
+        'D' => Color::new(180, 60, 180, 255),   // Magenta
+        'E' => Color::new(255, 99, 130, 255),   // Rosa (meta)
         _ => Color::new(120, 120, 120, 255),    // Gris
     }
 }
@@ -104,7 +106,6 @@ fn cast_ray(start_x: f32, start_y: f32, angle: f32, block_size: i32) -> (f32, ch
     let mut map_x = (start_x / block_size as f32) as i32;
     let mut map_y = (start_y / block_size as f32) as i32;
     
-    // Distancia hasta el siguiente lado x o y
     let mut side_dist_x: f32;
     let mut side_dist_y: f32;
     
@@ -113,7 +114,7 @@ fn cast_ray(start_x: f32, start_y: f32, angle: f32, block_size: i32) -> (f32, ch
     let delta_dist_y = if dy == 0.0 { 1e30 } else { (1.0 / dy).abs() };
     
     let mut hit = false;
-    let mut side = false; // false si es lado NS, true si es lado EW
+    let mut side = false;
     
     // Dirección del paso y distancia inicial al lado
     let step_x: i32;
@@ -152,7 +153,7 @@ fn cast_ray(start_x: f32, start_y: f32, angle: f32, block_size: i32) -> (f32, ch
             hit = true;
         } else {
             let cell = MAZE[map_y as usize].chars().nth(map_x as usize).unwrap_or('#');
-            if cell == '#' || cell == 'E' {
+            if cell == '#' || cell == 'A' || cell == 'B' || cell == 'C' || cell == 'D' || cell == 'E' {
                 hit = true;
             }
         }
@@ -243,6 +244,7 @@ fn main() {
             d.draw_text("- Tienes 3 vidas", 140, 370, 20, Color::LIGHTGRAY);
             d.draw_text("- Pierdes 1 vida al chocar con paredes", 140, 390, 20, Color::LIGHTGRAY);
             d.draw_text("- Sin vidas = Game Over", 140, 410, 20, Color::LIGHTGRAY);
+            d.draw_text("NUEVO: Paredes con colores diferentes", 80, 430, 18, Color::ORANGE);
             d.draw_text("Objetivo: Encuentra la salida marcada", 80, 450, 18, Color::LIME);
             d.draw_text("Presiona ENTER para comenzar", 120, 500, 30, Color::GREEN);
             drop(d);
@@ -433,9 +435,13 @@ fn main() {
             let wall_top = (window_height / 2) - wall_height / 2;
             let wall_bottom = wall_top + wall_height;
             let mut wall_color = match wall_type {
-                '#' => Color::new(120, 255, 120, 255),    // Verde claro
+                '#' => wall_color(wall_type),    // Rojo ladrillo
+                'A' => wall_color(wall_type),    // Verde
+                'B' => wall_color(wall_type),    // Azul
+                'C' => wall_color(wall_type),    // Amarillo
+                'D' => wall_color(wall_type),    // Magenta
                 'E' => {
-                    // ANIMACIÓN: parpadeo entre rosa y blanco
+                    // ANIMACIÓN: parpadeo entre rosa y blanco para la meta
                     let t = ((time * 2.0).sin() * 0.5 + 0.5) as f32;
                     Color::new(
                         (255.0 * (1.0 - t) + 255.0 * t) as u8,
@@ -497,8 +503,12 @@ fn main() {
                 let y = minimap_y + (row as i32) * mini_block;
                 
                 let color = match cell {
-                    '#' => Color::new(120, 255, 120, 255), 
-                    'E' => Color::new(255, 99, 130, 255),   
+                    '#' => wall_color(cell),    // Rojo ladrillo
+                    'A' => wall_color(cell),    // Verde
+                    'B' => wall_color(cell),    // Azul
+                    'C' => wall_color(cell),    // Amarillo
+                    'D' => wall_color(cell),    // Magenta
+                    'E' => wall_color(cell),    // Rosa (meta)
                     _ => Color::WHITE,                     
                 };
                 
@@ -534,7 +544,7 @@ fn main() {
         );
 
         // Fondo para las vidas
-        d.draw_rectangle(5, 5, 350, 120, Color::new(0, 0, 0, 150));
+        d.draw_rectangle(5, 5, 350, 150, Color::new(0, 0, 0, 150));
         
         // Título de vidas
         d.draw_text("VIDAS:", 15, 15, 20, Color::WHITE);
@@ -575,8 +585,12 @@ fn main() {
         d.draw_text("WASD: Mover | Mouse: Mirar", 15, 70, 14, Color::WHITE);
         d.draw_text("¡CUIDADO! Pierdes vida al chocar", 15, 90, 12, Color::ORANGE);
         
+        // Leyenda de colores de paredes
+        d.draw_text("Paredes:", 15, 110, 12, Color::WHITE);
+        d.draw_text("A: Verde | B: Azul | C: Amarillo | D: Magenta", 15, 125, 10, Color::LIGHTGRAY);
+        
         let fps_color = if fps > 30 { Color::GREEN } else if fps > 15 { Color::YELLOW } else { Color::RED };
-        d.draw_text(&format!("FPS: {}", fps), 15, 105, 14, fps_color);
+        d.draw_text(&format!("FPS: {}", fps), 15, 140, 14, fps_color);
         
         // Advertencia de pocas vidas
         if player.lives == 1 {
