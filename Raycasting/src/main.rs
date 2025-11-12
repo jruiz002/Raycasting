@@ -16,11 +16,6 @@ use renderer::render_scene;
 use ui::{draw_minimap, draw_hud};
 
 
-
-// cast_ray ahora vive en renderer.rs
-
-// draw_heart ahora vive en ui.rs
-
 fn main() {
     const SCREEN_WIDTH: i32 = 1280;
     const SCREEN_HEIGHT: i32 = 720;

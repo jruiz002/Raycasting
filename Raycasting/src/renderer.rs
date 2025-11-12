@@ -12,7 +12,6 @@ pub fn render_scene(
     screen_width: i32,
     screen_height: i32,
 ) {
-    // Fondo según efecto de daño ya se maneja en main (clear)
 
     // Cielo y piso
     let sky_color = Color::new(66, 135, 245, 255);
