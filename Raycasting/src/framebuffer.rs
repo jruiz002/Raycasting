@@ -10,6 +10,7 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
+    // Crear el frame buffer
     pub fn new(width: u32, height: u32) -> Self {
         let total_pixels = (width * height) as usize;
         Self {
@@ -22,6 +23,7 @@ impl Framebuffer {
         }
     }
 
+    // Limpio el framebuffer
     pub fn clear(&mut self) {
         for pixel in &mut self.pixels {
             *pixel = self.background_color;
