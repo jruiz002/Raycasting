@@ -1,59 +1,33 @@
-# Raycasting Laberinto (Rust + Raylib)
+# Raycasting 3D (Raylib)
 
-## Descripción
-Este proyecto es un juego de laberinto en primera persona implementado en Rust usando Raylib y rodio. El motor utiliza raycasting para simular un entorno 3D retro tipo Wolfenstein 3D. El objetivo es recorrer el laberinto desde el punto inicial hasta la meta, sin atravesar paredes.
+Este proyecto implementa un raycaster 3D sencillo usando Raylib, organizado en módulos y renderizado a un framebuffer.
 
-## Características
-- Motor de raycasting 3D simple y jugable
-- Movimiento y rotación de cámara (teclado y mouse)
-- Minimapa animado en la esquina superior derecha
-- Pantalla de bienvenida e instrucciones
-- Pantalla de éxito al llegar a la meta
-- Música de fondo y efectos de sonido al chocar
-- Animación de sprite en el minimapa
-- FPS mostrados en pantalla
+## Estructura
+- `src/main.rs`: bucle principal del juego y orquestación.
+- `src/framebuffer.rs`: manejo de framebuffer
+- `src/renderer.rs`: render de cielo/suelo y muros por raycasting, dibujando en el framebuffer.
+- `src/ui.rs`: HUD y minimapa dibujados sobre la escena.
+- `src/player.rs`: estado y utilidades del jugador.
+- `src/maze.rs`: definición del laberinto y utilidades de acceso.
+
+## Framebuffer
+- Se crea un framebuffer con `Framebuffer::new`.
+- Se dibuja la escena 3D con `Framebuffer::begin(...)` y `renderer::render_scene(...)`.
+- Se presenta el resultado en pantalla con `Framebuffer::draw_to_screen(...)` usando `draw_texture_rec` con flip vertical.
 
 ## Controles
-- **W/S**: Avanzar / Retroceder
-- **A/D**: Girar a la izquierda / derecha
-- **Mouse**: Girar la cámara horizontalmente
-- **ESC**: Salir del juego
-- **ENTER**: Comenzar desde la pantalla de bienvenida o reiniciar tras ganar
+- `W/S`: avanzar/retroceder
+- `A/D`: girar
+- Mouse: mirar
+- `ESC`: salir
 
-## Requisitos
-- Rust (https://www.rust-lang.org/)
-- Raylib instalado en el sistema (por ejemplo, con Homebrew: `brew install raylib`)
-- Archivos de audio en la carpeta `assets/`:
-  - `laberinto.mp3` (música de fondo)
-  - `bump.wav` (efecto de choque)
+## Construcción y ejecución
+- Requisitos: Rust estable, Raylib para Rust (vía crate `raylib`), cargo.
+- Compilar: `cargo build -q`
+- Ejecutar: `cargo run -q`
 
-## Instalación y ejecución
-1. **Clona el repositorio o descarga el código fuente.**
-2. **Instala las dependencias:**
-   - Raylib (nativo):
-     ```sh
-     brew install raylib
-     ```
-   - Rust y cargo (si no los tienes):
-     ```sh
-     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-     ```
-3. **Coloca los archivos de audio en la carpeta `assets/`**
-   - `assets/laberinto.mp3`
-   - `assets/bump.wav`
-4. **Compila el proyecto:**
-   ```sh
-   cargo build
-   ```
-5. **Ejecuta el juego:**
-   ```sh
-   cargo run
-   ```
+## Organización del código
+- La escena 3D (cielo/suelo/muros) se dibuja dentro del framebuffer.
+- El HUD y minimapa se dibujan sobre el resultado del framebuffer.
+- El efecto de linterna oscurece los bordes sin tapar el centro.
 
-## Notas
-- Puedes modificar el laberinto editando la constante `MAZE` en `src/main.rs`.
-- Para agregar más niveles, puedes crear más mapas y modificar la lógica de selección.
-- Si tienes problemas con el audio, asegúrate de que los archivos existen y están en el formato correcto.
-
----
-¡Disfruta explorando el laberinto y buena suerte! 
