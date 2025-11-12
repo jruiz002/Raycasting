@@ -10,8 +10,8 @@ mod renderer;
 mod ui;
 
 use player::Player;
-use maze::{MAZE, get_maze_cell, is_wall, wall_color, find_cell};
-use framebuffer::{Framebuffer, clear as fb_clear};
+use maze::{get_maze_cell, is_wall, find_cell};
+use framebuffer::Framebuffer;
 use renderer::render_scene;
 use ui::{draw_minimap, draw_hud};
 
@@ -30,7 +30,8 @@ fn main() {
         .title("Laberinto Raycasting 3D - Sistema de Vidas")
         .build();
 
-    let mut framebuffer = Framebuffer::new(&mut rl, &thread, SCREEN_WIDTH, SCREEN_HEIGHT);
+    let mut framebuffer = Framebuffer::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32);
+    framebuffer.set_background_color(Color::BLACK);
 
     rl.set_mouse_position((SCREEN_WIDTH as f32 / 2.0, SCREEN_HEIGHT as f32 / 2.0));
     rl.disable_cursor();
@@ -236,22 +237,35 @@ fn main() {
 
         let time = rl.get_time();
 
-        let mut d_texture = framebuffer.begin(&mut rl, &thread);
+        // Renderizar escena 3D en nuestro framebuffer personalizado
+        render_scene(&mut framebuffer, &player, fov, block_size, time, invulnerability_time, SCREEN_WIDTH, SCREEN_HEIGHT);
 
-        // Efecto de daño - pantalla roja
+        // Aplicar efecto de daño directamente al framebuffer si es necesario
         if damage_effect_time > 0.0 {
             let intensity = (damage_effect_time / 0.5 * 100.0) as u8;
-            d_texture.clear_background(Color::new(255, intensity, intensity, 255));
-        } else {
-            d_texture.clear_background(Color::BLACK);
+            let damage_color = Color::new(255, intensity, intensity, 255);
+            
+            // Aplicar efecto de daño a todo el framebuffer
+            for y in 0..framebuffer.height {
+                for x in 0..framebuffer.width {
+                    let current_pixel = framebuffer.get_pixel(x, y);
+                    let mixed_color = Color::new(
+                        ((current_pixel.r as u16 + damage_color.r as u16) / 2) as u8,
+                        ((current_pixel.g as u16 + damage_color.g as u16) / 2) as u8,
+                        ((current_pixel.b as u16 + damage_color.b as u16) / 2) as u8,
+                        255,
+                    );
+                    framebuffer.set_pixel_color(x, y, mixed_color);
+                }
+            }
         }
 
-        // Escena 3D en la textura
-        render_scene(&mut d_texture, &player, fov, block_size, time, invulnerability_time, SCREEN_WIDTH, SCREEN_HEIGHT);
-
-        drop(d_texture);
+        // Actualizar la textura del framebuffer
+        framebuffer.swap_buffers(&mut rl, &thread);
 
         let mut d = rl.begin_drawing(&thread);
+        
+        // Dibujar nuestro framebuffer a la pantalla
         framebuffer.draw_to_screen(&mut d);
 
         // --- EFECTO DE LINTERNA (usando anillos para no cubrir el centro) ---

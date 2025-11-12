@@ -1,9 +1,10 @@
 use raylib::prelude::*;
 use crate::maze::{MAZE, wall_color};
 use crate::player::Player;
+use crate::framebuffer::Framebuffer;
 
 pub fn render_scene(
-    d: &mut RaylibTextureMode<RaylibHandle>,
+    framebuffer: &mut Framebuffer,
     player: &Player,
     fov: f32,
     block_size: i32,
@@ -12,16 +13,26 @@ pub fn render_scene(
     screen_width: i32,
     screen_height: i32,
 ) {
+    // Limpiar framebuffer
+    framebuffer.clear();
 
-    // Cielo y piso
+    // Renderizar cielo y piso
     let sky_color = Color::new(66, 135, 245, 255);
     let floor_color = Color::new(180, 180, 180, 255);
     let sky_height = (screen_height as f32 * 0.25) as i32;
+    
+    // Dibujar cielo
     for y in 0..sky_height {
-        d.draw_line(0, y, screen_width, y, sky_color);
+        for x in 0..screen_width {
+            framebuffer.set_pixel_color(x as u32, y as u32, sky_color);
+        }
     }
+    
+    // Dibujar piso
     for y in sky_height..screen_height {
-        d.draw_line(0, y, screen_width, y, floor_color);
+        for x in 0..screen_width {
+            framebuffer.set_pixel_color(x as u32, y as u32, floor_color);
+        }
     }
 
     // Raycasting vertical por columnas
@@ -49,6 +60,7 @@ pub fn render_scene(
             }
             _ => Color::WHITE,
         };
+        
         if is_side {
             col = Color::new(
                 (col.r as f32 * 0.7) as u8,
@@ -76,7 +88,9 @@ pub fn render_scene(
             );
         }
 
-        d.draw_line(x, wall_top.max(0), x, wall_bottom.min(screen_height), col);
+        // Dibujar línea vertical de la pared
+        framebuffer.set_current_color(col);
+        framebuffer.draw_vertical_line(x as u32, wall_top.max(0), wall_bottom.min(screen_height));
     }
 }
 
