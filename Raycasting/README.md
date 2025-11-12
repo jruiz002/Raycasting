@@ -35,8 +35,3 @@ Este proyecto implementa un raycaster 3D sencillo usando Raylib, organizado en m
 - Edita `src/maze.rs` para cambiar el mapa.
 - Paredes: `#` y letras `A..E` coloreadas.
 - La meta está marcada con `E`.
-
-## Uso de Git y limpieza
-- Evita incluir archivos del sistema como `.DS_Store` (ya listados en `.gitignore`).
-- Si necesitas limpiar el repositorio local: `find . -name ".DS_Store" -delete`.
-- Recomiendo commits atómicos con mensajes claros: `feat(framebuffer)`, `feat(renderer)`, `refactor(ui)`, `chore(clean)`, `docs(readme)`.
