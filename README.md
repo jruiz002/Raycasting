@@ -2,6 +2,12 @@
 
 Este proyecto implementa un raycaster 3D sencillo usando Raylib, organizado en módulos y renderizado a un framebuffer.
 
+## Video Demo
+
+[![Raycasting 3D Demo](https://img.youtube.com/vi/TxA69BXneNI/maxresdefault.jpg)](https://youtu.be/TxA69BXneNI?si=qZqImrKWWSxpw8Pf)
+
+*Click en la imagen para ver el video*
+
 ## Estructura
 - `src/main.rs`: bucle principal del juego y orquestación.
 - `src/framebuffer.rs`: manejo de framebuffer
